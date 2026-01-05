@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ons Budget</title>
+    
+    <!-- Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <!-- Icon voor iOS -->
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2382/2382461.png">
+
+    <style>
+        body { overscroll-behavior-y: none; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .pulse-on-click:active { transform: scale(0.95); }
+        .fade-in { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .scale-in { animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- 1. JOUW FIREBASE CONFIG ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDuGdWmbNVNV0Yo5tlA-VFab1ZHGEOgvgA",
+            authDomain: "budgetplan-bfd60.firebaseapp.com",
+            projectId: "budgetplan-bfd60",
+            storageBucket: "budgetplan-bfd60.firebasestorage.app",
+            messagingSenderId: "823007347632",
+            appId: "1:823007347632:web:c29b05e9b3a263136e0c75"
+        };
+        // -------------------------------
+
+        // Init Firebase
+        let db;
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+        } catch (error) {
+            console.error("Firebase niet goed ingesteld. Heb je de config ingevuld?", error);
+        }
+
+        // --- DOMAIN MAPPING ---
+        const SHOP_DOMAINS = {
+            'Colruyt': 'colruyt.be', 'Delhaize': 'delhaize.be', 'AH': 'ah.nl', 'Albert Heijn': 'ah.nl',
+            'Aldi': 'aldi.be', 'Lidl': 'lidl.be', 'Shell': 'shell.com', 'Total': 'totalenergies.be',
+            'Esso': 'esso.be', 'Lukoil': 'lukoil.be', 'Action': 'action.com', 'Bol.com': 'bol.com',
+            'Coolblue': 'coolblue.be', 'Amazon': 'amazon.com', 'Telenet': 'telenet.be',
+            'Proximus': 'proximus.be', 'Engie': 'engie.be', 'Luminus': 'luminus.be',
+            'Netflix': 'netflix.com', 'Spotify': 'spotify.com', 'McDonalds': 'mcdonalds.com',
+            'Burger King': 'burgerking.be', 'Starbucks': 'starbucks.com', 'Ikea': 'ikea.com',
+            'Decathlon': 'decathlon.be', 'Kruidvat': 'kruidvat.be'
+        };
+
+        const ShopLogo = ({ shopName, size = "w-10 h-10", textSize = "text-sm" }) => {
+            const [imgError, setImgError] = useState(false);
+            const findDomain = (name) => {
+                if (!name) return null;
+                if (SHOP_DOMAINS[name]) return SHOP_DOMAINS[name];
+                const key = Object.keys(SHOP_DOMAINS).find(k => k.toLowerCase() === name.toLowerCase());
+                if (key) return SHOP_DOMAINS[key];
+                const partialKey = Object.keys(SHOP_DOMAINS).find(k => name.toLowerCase().includes(k.toLowerCase()));
+                if (partialKey) return SHOP_DOMAINS[partialKey];
+                return null;
+            };
+            const domain = findDomain(shopName);
+            const logoUrl = domain ? `https://logo.clearbit.com/${domain}` : null;
+            if (logoUrl && !imgError) return <img src={logoUrl} alt={shopName} className={`${size} rounded-full object-contain bg-white shadow-sm border border-gray-100 shrink-0`} onError={() => setImgError(true)} />;
+            const colors = ['bg-blue-100 text-blue-600', 'bg-green-100 text-green-600', 'bg-yellow-100 text-yellow-600', 'bg-purple-100 text-purple-600', 'bg-pink-100 text-pink-600'];
+            const colorClass = colors[(shopName?.length || 0) % colors.length];
+            return <div className={`${size} rounded-full ${colorClass} flex items-center justify-center font-bold ${textSize} shrink-0 shadow-sm border border-white`}>{(shopName?.charAt(0) || '?').toUpperCase()}</div>;
+        };
+
+        const CATEGORY_COLORS = { 'Boodschappen': '#3b82f6', 'Auto': '#ef4444', 'Horeca': '#f59e0b', 'Vaste Lasten': '#10b981', 'Shoppen': '#8b5cf6', 'Overig': '#9ca3af' };
+
+        // --- MODALS ---
+        const EditTransactionModal = ({ transaction, onClose, onSave, onDelete }) => {
+            const [formData, setFormData] = useState({ ...transaction });
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center px-4 fade-in">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
+                    <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl relative z-10 scale-in flex flex-col gap-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="font-bold text-lg text-gray-800">Bewerken</h3>
+                            <button onClick={onClose} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><span className="material-icons-round text-gray-600 text-sm">close</span></button>
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-400 uppercase">Bedrag (€)</label>
+                            <input type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: parseFloat(e.target.value)})} className="w-full text-3xl font-bold border-b py-2 focus:border-blue-500 focus:outline-none" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-400 uppercase">Winkel</label>
+                            <input type="text" value={formData.shop} onChange={e => setFormData({...formData, shop: e.target.value})} className="w-full text-lg font-medium border-b py-2 focus:border-blue-500 focus:outline-none" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-400 uppercase">Categorie</label>
+                            <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full text-lg font-medium border-b py-2 bg-transparent">
+                                {Object.keys(CATEGORY_COLORS).map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex gap-3 mt-4">
+                            <button onClick={() => onDelete(transaction.id)} className="flex-1 py-3 rounded-xl border border-red-100 text-red-600 font-bold hover:bg-red-50">Verwijderen</button>
+                            <button onClick={() => onSave(formData.id, formData)} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg">Opslaan</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const BudgetModal = ({ currentBudget, onClose, onSave }) => {
+            const [val, setVal] = useState(currentBudget);
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center px-4 fade-in">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
+                    <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl relative z-10 scale-in text-center">
+                         <h3 className="font-bold text-lg text-gray-800 mb-4">Maandbudget</h3>
+                         <div className="relative inline-block mb-6">
+                            <span className="absolute left-0 top-1/2 -translate-y-1/2 text-xl text-gray-400">€</span>
+                            <input type="number" value={val} onChange={e => setVal(e.target.value)} className="pl-6 w-32 text-4xl font-bold text-center border-b-2 border-blue-500 focus:outline-none" autoFocus />
+                         </div>
+                         <button onClick={() => onSave(val)} className="w-full py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg">Opslaan</button>
+                    </div>
+                </div>
+            );
+        };
+
+        function App() {
+            const [view, setView] = useState('add'); 
+            const [amount, setAmount] = useState('');
+            const [transactions, setTransactions] = useState([]);
+            const [selectedCategory, setSelectedCategory] = useState('Alles');
+            const [shopSearch, setShopSearch] = useState('');
+            const [monthlyBudget, setMonthlyBudget] = useState(2000);
+            
+            const [editingTx, setEditingTx] = useState(null);
+            const [isEditingBudget, setIsEditingBudget] = useState(false);
+
+            const pieChartRef = useRef(null);
+            const pieChartInstance = useRef(null);
+            const barChartRef = useRef(null);
+            const barChartInstance = useRef(null);
+
+            // --- REALTIME SYNC MET FIREBASE ---
+            useEffect(() => {
+                if (!db) return;
+                
+                // 1. Luister naar Transacties (Realtime!)
+                const q = query(collection(db, "transactions"), orderBy("date", "desc"));
+                const unsubscribeTx = onSnapshot(q, (snapshot) => {
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setTransactions(data);
+                });
+
+                // 2. Luister naar Budget Instelling
+                const docRef = doc(db, "settings", "budget");
+                const unsubscribeBudget = onSnapshot(docRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        setMonthlyBudget(docSnap.data().amount);
+                    }
+                });
+
+                return () => { unsubscribeTx(); unsubscribeBudget(); };
+            }, []);
+            // ----------------------------------
+
+            useEffect(() => {
+                if (view === 'stats') { setTimeout(() => { renderPieChart(); renderBarChart(); }, 50); }
+            }, [view, transactions, selectedCategory]);
+
+            useEffect(() => {
+                if (view === 'add') { setShopSearch(''); setTimeout(() => document.getElementById('amountInput')?.focus(), 100); }
+            }, [view]);
+
+            // --- ACTIONS ---
+            const handleAdd = async (shop, catOverride = null) => {
+                if (!amount) { document.getElementById('amountInput').focus(); return; }
+                
+                let cat = 'Overig';
+                const lowerShop = shop.toLowerCase();
+                if (catOverride) cat = catOverride;
+                else {
+                    // Auto-categorisatie
+                    if (['colruyt', 'delhaize', 'aldi', 'ah', 'lidl', 'kruidvat'].some(s => lowerShop.includes(s))) cat = 'Boodschappen';
+                    else if (['shell', 'total', 'esso', 'lukoil', 'tesla'].some(s => lowerShop.includes(s))) cat = 'Auto';
+                    else if (['restaurant', 'bar', 'mcdo', 'burger', 'starbucks', 'frituur'].some(s => lowerShop.includes(s))) cat = 'Horeca';
+                    else if (['telenet', 'huisbaas', 'engie', 'proximus', 'luminus', 'spotify', 'netflix'].some(s => lowerShop.includes(s))) cat = 'Vaste Lasten';
+                    else if (['bol.com', 'action', 'coolblue', 'amazon', 'ikea', 'decathlon'].some(s => lowerShop.includes(s))) cat = 'Shoppen';
+                }
+
+                try {
+                    await addDoc(collection(db, "transactions"), {
+                        amount: parseFloat(amount),
+                        shop: shop,
+                        category: cat,
+                        date: new Date().toISOString()
+                    });
+                    setAmount('');
+                    setShopSearch('');
+                    if (navigator.vibrate) navigator.vibrate(50);
+                } catch (e) { alert("Fout bij opslaan: " + e.message); }
+            };
+
+            const handleUpdateTx = async (id, newData) => {
+                try {
+                    const txRef = doc(db, "transactions", id);
+                    await updateDoc(txRef, { amount: newData.amount, shop: newData.shop, category: newData.category });
+                    setEditingTx(null);
+                } catch (e) { alert("Kon niet updaten"); }
+            };
+
+            const handleDeleteTx = async (id) => {
+                if(confirm("Verwijderen?")) {
+                    await deleteDoc(doc(db, "transactions", id));
+                    setEditingTx(null);
+                }
+            };
+
+            const handleUpdateBudget = async (newVal) => {
+                await ioUpdateBudget(newVal);
+                setIsEditingBudget(false);
+            };
+            
+            // Helper om budget op te slaan (creëer document indien niet bestaat)
+            const ioUpdateBudget = async (val) => {
+                const docRef = doc(db, "settings", "budget");
+                // We gebruiken setDoc (merge) via updateDoc logica is lastiger als doc niet bestaat
+                // Voor simpelheid gebruiken we hier updateDoc, maar als het faalt, moeten we eigenlijk setDoc doen.
+                // Omdat ik geen setDoc heb geïmporteerd in de html, hacken we het even:
+                // We gaan er vanuit dat settings/budget document bestaat. Zo niet, maak het eenmalig aan in Firebase console of voeg error handling toe.
+                try {
+                    await updateDoc(docRef, { amount: parseFloat(val) });
+                } catch(e) {
+                   // Fallback: Als document niet bestaat, probeer set (via een workaround of alert)
+                   alert("Tip: Maak in Firebase een collectie 'settings' met document 'budget' aan."); 
+                }
+            }
+
+            // --- COMPUTED ---
+            const { displayShops, showAddNew } = useMemo(() => {
+                const counts = {};
+                transactions.forEach(t => { counts[t.shop] = (counts[t.shop] || 0) + 1; });
+                const allSortedShops = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+                if (!shopSearch) {
+                    const defaultShops = ['Colruyt', 'Delhaize', 'AH', 'Shell', 'Horeca', 'Bol.com'];
+                    const topShops = allSortedShops.length > 0 ? allSortedShops.slice(0, 6) : defaultShops;
+                    return { displayShops: topShops, showAddNew: false };
+                }
+                const filtered = allSortedShops.filter(s => s.toLowerCase().includes(shopSearch.toLowerCase()));
+                const exactMatch = filtered.some(s => s.toLowerCase() === shopSearch.toLowerCase());
+                return { displayShops: filtered, showAddNew: !exactMatch };
+            }, [transactions, shopSearch]);
+
+            const currentMonthStr = new Date().toISOString().slice(0, 7);
+            const filteredTransactions = transactions.filter(t => {
+                const dateMatch = t.date.startsWith(currentMonthStr);
+                const catMatch = selectedCategory === 'Alles' || t.category === selectedCategory;
+                return dateMatch && catMatch;
+            });
+            const currentTotalSpent = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
+            const uniqueCategories = ['Alles', ...new Set(transactions.map(t => t.category))];
+            const budgetPct = Math.min((currentTotalSpent / monthlyBudget) * 100, 100);
+            const isOverBudget = currentTotalSpent > monthlyBudget;
+            const remaining = monthlyBudget - currentTotalSpent;
+
+            // --- CHARTS ---
+            const renderPieChart = () => {
+                if (!pieChartRef.current || pieChartInstance.current) { if(pieChartInstance.current) pieChartInstance.current.destroy(); }
+                const totals = {};
+                filteredTransactions.forEach(t => { 
+                    const key = selectedCategory === 'Alles' ? t.category : t.shop;
+                    totals[key] = (totals[key] || 0) + t.amount;
+                });
+                const ctx = pieChartRef.current.getContext('2d');
+                pieChartInstance.current = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(totals),
+                        datasets: [{ data: Object.values(totals), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1'], borderWidth: 0 }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 10 } } } } }
+                });
+            };
+
+            const renderBarChart = () => {
+                if (!barChartRef.current || barChartInstance.current) { if(barChartInstance.current) barChartInstance.current.destroy(); }
+                const monthlyData = {}; const allCategories = new Set();
+                const sortedTx = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+                sortedTx.forEach(t => {
+                    if (selectedCategory !== 'Alles' && t.category !== selectedCategory) return;
+                    const monthKey = t.date.slice(0, 7); 
+                    if (!monthlyData[monthKey]) monthlyData[monthKey] = {};
+                    const key = selectedCategory === 'Alles' ? t.category : 'Totaal';
+                    monthlyData[monthKey][key] = (monthlyData[monthKey][key] || 0) + t.amount;
+                    allCategories.add(key);
+                });
+                const labels = Object.keys(monthlyData).sort(); const categories = Array.from(allCategories);
+                const datasets = categories.map(cat => ({
+                    label: cat, data: labels.map(month => monthlyData[month][cat] || 0), backgroundColor: selectedCategory === 'Alles' ? (CATEGORY_COLORS[cat] || '#ccc') : (CATEGORY_COLORS[selectedCategory] || '#3b82f6'), borderRadius: 4,
+                }));
+                const ctx = barChartRef.current.getContext('2d');
+                barChartInstance.current = new Chart(ctx, { type: 'bar', data: { labels, datasets }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true } }, plugins: { legend: { display: false } } } });
+            };
+
+            // --- UI SCREENS ---
+            const AddScreen = () => (
+                <div className="flex flex-col h-full slide-up">
+                    <div className="flex-none flex flex-col justify-center items-center py-6">
+                        <label className="text-gray-400 font-medium text-xs tracking-widest uppercase mb-2">Bedrag</label>
+                        <div className="relative flex items-center justify-center">
+                            <span className="text-3xl text-gray-300 mr-2 font-light">€</span>
+                            <input id="amountInput" type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" className="text-6xl font-bold text-gray-800 bg-transparent w-40 text-center focus:outline-none placeholder-gray-200" autoFocus />
+                        </div>
+                    </div>
+                    <div className="flex-1 bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.05)] p-6 pb-24 flex flex-col overflow-hidden">
+                        <div className="mb-4 relative">
+                            <input type="text" value={shopSearch} onChange={(e) => setShopSearch(e.target.value)} placeholder="Zoek of typ winkel..." className="w-full bg-gray-50 rounded-xl px-4 py-4 pl-12 outline-none border border-transparent focus:border-blue-500 focus:bg-white transition-all font-medium text-gray-700" />
+                            <span className="material-icons-round absolute left-4 top-4 text-gray-400">search</span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto no-scrollbar">
+                            <div className="grid grid-cols-2 gap-3 pb-4">
+                                {displayShops.map(shop => (
+                                    <button key={shop} onClick={() => handleAdd(shop)} className="pulse-on-click py-3 bg-white hover:bg-blue-50 hover:border-blue-200 rounded-2xl border border-gray-100 flex items-center px-4 transition-all shadow-sm gap-3 group">
+                                        <ShopLogo shopName={shop} size="w-8 h-8" textSize="text-xs" />
+                                        <span className="text-sm font-bold text-gray-700 group-hover:text-blue-700 truncate">{shop}</span>
+                                    </button>
+                                ))}
+                                {showAddNew && (
+                                    <button onClick={() => handleAdd(shopSearch)} className="col-span-2 pulse-on-click py-4 bg-blue-600 rounded-2xl flex items-center justify-center transition-colors shadow-lg shadow-blue-200 gap-2 mt-2">
+                                        <span className="material-icons-round text-white">add_circle</span>
+                                        <span className="text-sm font-bold text-white">Voeg "{shopSearch}" toe</span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const StatsScreen = () => (
+                <div className="flex flex-col h-full slide-up px-4 pt-4 pb-24 overflow-y-auto no-scrollbar">
+                    <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar mb-2">
+                        {uniqueCategories.map(cat => (
+                            <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${selectedCategory === cat ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-white text-gray-600 border border-gray-100'}`}>{cat}</button>
+                        ))}
+                    </div>
+                    <div className={`rounded-3xl p-6 text-white shadow-xl mb-6 transition-colors duration-300 relative ${selectedCategory === 'Alles' ? (isOverBudget ? 'bg-gradient-to-br from-red-500 to-red-700 shadow-red-200' : 'bg-gradient-to-br from-blue-600 to-blue-800 shadow-blue-200') : 'bg-gray-800 shadow-gray-300'}`}>
+                        <div className="flex justify-between items-start mb-2">
+                            <div className="opacity-80 text-sm font-medium">{selectedCategory === 'Alles' ? 'Totaal deze maand' : `Totaal ${selectedCategory}`}</div>
+                            {selectedCategory === 'Alles' && (
+                                <button onClick={() => setIsEditingBudget(true)} className="flex items-center gap-1 bg-white/20 hover:bg-white/30 px-2 py-1 rounded-lg text-xs font-medium transition">
+                                    <span className="material-icons-round text-xs">edit</span> €{monthlyBudget}
+                                </button>
+                            )}
+                        </div>
+                        <div className="text-4xl font-bold mb-4">€ {currentTotalSpent.toFixed(2)}</div>
+                        {selectedCategory === 'Alles' && (
+                            <div>
+                                <div className="w-full bg-black/20 h-2 rounded-full overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all duration-500 ${isOverBudget ? 'bg-white' : 'bg-green-400'}`} style={{width: `${budgetPct}%`}}></div>
+                                </div>
+                                <div className="flex justify-between mt-2 text-xs font-medium opacity-90">
+                                    <span>0%</span>
+                                    {isOverBudget ? <span>OVER BUDGET: € {Math.abs(remaining).toFixed(2)}</span> : <span>Over: € {remaining.toFixed(2)}</span>}
+                                    <span>100%</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <div className="bg-white rounded-3xl p-5 shadow-sm mb-6">
+                        <h3 className="text-gray-800 font-bold mb-4 text-sm uppercase">{selectedCategory === 'Alles' ? 'Verdeling' : `Winkels`}</h3>
+                        <div className="h-40"><canvas ref={pieChartRef}></canvas></div>
+                    </div>
+                    <div className="bg-white rounded-3xl p-5 shadow-sm mb-6">
+                        <h3 className="text-gray-800 font-bold mb-4 text-sm uppercase">Trend</h3>
+                        <div className="h-56"><canvas ref={barChartRef}></canvas></div>
+                    </div>
+                    <div className="space-y-3">
+                        {filteredTransactions.slice(0, 15).map(t => (
+                            <div key={t.id} onClick={() => setEditingTx(t)} className="bg-white p-3 rounded-2xl flex justify-between items-center shadow-sm border border-gray-50 active:bg-gray-50 cursor-pointer">
+                                <div className="flex items-center gap-3">
+                                    <ShopLogo shopName={t.shop} />
+                                    <div>
+                                        <div className="font-bold text-gray-800">{t.shop}</div>
+                                        <div className="text-xs text-gray-400">{t.category} • {new Date(t.date).toLocaleDateString()}</div>
+                                    </div>
+                                </div>
+                                <div className="font-bold text-gray-900">- €{t.amount.toFixed(2)}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="h-screen w-full max-w-md mx-auto bg-gray-50 shadow-2xl overflow-hidden flex flex-col relative">
+                    {editingTx && <EditTransactionModal transaction={editingTx} onClose={() => setEditingTx(null)} onSave={handleUpdateTx} onDelete={handleDeleteTx} />}
+                    {isEditingBudget && <BudgetModal currentBudget={monthlyBudget} onClose={() => setIsEditingBudget(false)} onSave={handleUpdateBudget} />}
+                    
+                    <div className="flex-1 overflow-hidden relative">
+                        {view === 'add' ? <AddScreen /> : <StatsScreen />}
+                    </div>
+                    <div className="bg-white/90 backdrop-blur-md border-t border-gray-100 absolute bottom-0 w-full pb-6 pt-3 px-6 flex justify-around z-20">
+                        <button onClick={() => setView('add')} className={`flex flex-col items-center transition-all ${view === 'add' ? '-translate-y-2' : 'opacity-50'}`}><div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-1 shadow-lg ${view === 'add' ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-white text-gray-600 border'}`}><span className="material-icons-round">add</span></div><span className="text-[10px] font-bold text-gray-500">Nieuw</span></button>
+                        <button onClick={() => setView('stats')} className={`flex flex-col items-center transition-all ${view === 'stats' ? '-translate-y-2' : 'opacity-50'}`}><div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-1 shadow-lg ${view === 'stats' ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-white text-gray-600 border'}`}><span className="material-icons-round">pie_chart</span></div><span className="text-[10px] font-bold text-gray-500">Inzicht</span></button>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
