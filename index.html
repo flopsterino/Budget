@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Ons Budget</title>
     
-    <!-- Zorg dat je manifest.json ook in de map staat voor het app-icoon -->
     <link rel="manifest" href="manifest.json">
     
     <!-- Libraries -->
@@ -40,7 +39,7 @@
 
         const { useState, useEffect, useRef, useMemo } = React;
 
-        // --- JOUW CONFIGURATIE ---
+        // --- JOUW ORIGINELE CONFIGURATIE ---
         const firebaseConfig = {
             apiKey: "AIzaSyDuGdWmbNVNV0Yo5tlA-VFab1ZHGEOgvgA",
             authDomain: "budgetplan-bfd60.firebaseapp.com",
@@ -60,7 +59,31 @@
             console.error("Firebase Init Error", error);
         }
 
-        // --- HELPER COMPONENTEN (Login, Logos, Modals) ---
+        // --- HELPER FUNCTIES ---
+        // Resize afbeelding naar base64 string om opslag te sparen
+        const processImage = (file) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const MAX_WIDTH = 150; // Klein formaat voor logo
+                        const scaleSize = MAX_WIDTH / img.width;
+                        canvas.width = MAX_WIDTH;
+                        canvas.height = img.height * scaleSize;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        resolve(canvas.toDataURL('image/jpeg', 0.7));
+                    };
+                };
+                reader.onerror = error => reject(error);
+            });
+        };
+
+        // --- COMPONENTS ---
 
         const LoginScreen = () => {
             const [email, setEmail] = useState('');
@@ -120,8 +143,16 @@
             'Decathlon': 'decathlon.be', 'Kruidvat': 'kruidvat.be'
         };
 
-        const ShopLogo = ({ shopName, size = "w-10 h-10", textSize = "text-sm" }) => {
+        // Logo component met ondersteuning voor custom (base64) logo's
+        const ShopLogo = ({ shopName, customLogo, size = "w-10 h-10", textSize = "text-sm" }) => {
             const [imgError, setImgError] = useState(false);
+            
+            // 1. Custom logo (indien aanwezig)
+            if (customLogo) {
+                return <img src={customLogo} alt={shopName} className={`${size} rounded-full object-cover bg-white shadow-sm border border-gray-100 shrink-0`} />;
+            }
+
+            // 2. Auto-fetch logic
             const findDomain = (name) => {
                 if (!name) return null;
                 if (SHOP_DOMAINS[name]) return SHOP_DOMAINS[name];
@@ -133,13 +164,89 @@
             };
             const domain = findDomain(shopName);
             const logoUrl = domain ? `https://logo.clearbit.com/${domain}` : null;
+            
             if (logoUrl && !imgError) return <img src={logoUrl} alt={shopName} className={`${size} rounded-full object-contain bg-white shadow-sm border border-gray-100 shrink-0`} onError={() => setImgError(true)} />;
+            
+            // 3. Fallback Initiaal
             const colors = ['bg-blue-100 text-blue-600', 'bg-green-100 text-green-600', 'bg-yellow-100 text-yellow-600', 'bg-purple-100 text-purple-600', 'bg-pink-100 text-pink-600'];
             const colorClass = colors[(shopName?.length || 0) % colors.length];
             return <div className={`${size} rounded-full ${colorClass} flex items-center justify-center font-bold ${textSize} shrink-0 shadow-sm border border-white`}>{(shopName?.charAt(0) || '?').toUpperCase()}</div>;
         };
 
         const CATEGORY_COLORS = { 'Boodschappen': '#3b82f6', 'Auto': '#ef4444', 'Horeca': '#f59e0b', 'Vaste Lasten': '#10b981', 'Shoppen': '#8b5cf6', 'Overig': '#9ca3af' };
+
+        // --- NIEUW: New Shop Modal ---
+        const CreateShopModal = ({ initialName, onClose, onSave }) => {
+            const [name, setName] = useState(initialName || '');
+            const [category, setCategory] = useState('Overig');
+            const [logoPreview, setLogoPreview] = useState(null);
+            const [uploading, setUploading] = useState(false);
+
+            const handleFileChange = async (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    setUploading(true);
+                    try {
+                        const base64 = await processImage(file);
+                        setLogoPreview(base64);
+                    } catch (error) {
+                        alert("Kon afbeelding niet verwerken");
+                    }
+                    setUploading(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center px-4 fade-in">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
+                    <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl relative z-10 scale-in">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-lg text-gray-800">Nieuwe Winkel</h3>
+                            <button onClick={onClose} className="p-2 bg-gray-100 rounded-full"><span className="material-icons-round text-sm">close</span></button>
+                        </div>
+                        
+                        <div className="flex flex-col gap-4">
+                            {/* Logo Upload */}
+                            <div className="flex items-center gap-4">
+                                <div className="w-16 h-16 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative">
+                                    {logoPreview ? (
+                                        <img src={logoPreview} className="w-full h-full object-cover" />
+                                    ) : (
+                                        <span className="material-icons-round text-gray-400">photo_camera</span>
+                                    )}
+                                    <input type="file" accept="image/*" onChange={handleFileChange} className="absolute inset-0 opacity-0 cursor-pointer" />
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                    <p>Tik om logo te kiezen</p>
+                                    <p className="text-xs text-gray-400">(Optioneel)</p>
+                                </div>
+                            </div>
+
+                            {/* Inputs */}
+                            <div>
+                                <label className="text-xs font-bold text-gray-400 uppercase">Naam</label>
+                                <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 border-b font-medium focus:border-blue-500 outline-none" placeholder="Naam van winkel" />
+                            </div>
+                            
+                            <div>
+                                <label className="text-xs font-bold text-gray-400 uppercase">Categorie</label>
+                                <select value={category} onChange={e => setCategory(e.target.value)} className="w-full p-2 border-b font-medium bg-transparent focus:border-blue-500 outline-none">
+                                    {Object.keys(CATEGORY_COLORS).map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                </select>
+                            </div>
+
+                            <button 
+                                onClick={() => onSave({ name, category, logo: logoPreview })} 
+                                className="mt-2 w-full py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg"
+                                disabled={!name}
+                            >
+                                Aanmaken & Toevoegen
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
 
         const EditTransactionModal = ({ transaction, onClose, onSave, onDelete }) => {
             const [formData, setFormData] = useState({ ...transaction });
@@ -207,6 +314,7 @@
             
             const [editingTx, setEditingTx] = useState(null);
             const [isEditingBudget, setIsEditingBudget] = useState(false);
+            const [showCreateShop, setShowCreateShop] = useState(false); // Nieuw: Create modal state
 
             const pieChartRef = useRef(null);
             const pieChartInstance = useRef(null);
@@ -226,14 +334,12 @@
             useEffect(() => {
                 if (!db || !user) return;
                 
-                // Transacties ophalen
                 const q = query(collection(db, "transactions"), orderBy("date", "desc"));
                 const unsubscribeTx = onSnapshot(q, (snapshot) => {
                     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setTransactions(data);
                 });
 
-                // Budget ophalen
                 const docRef = doc(db, "settings", "budget");
                 const unsubscribeBudget = onSnapshot(docRef, (docSnap) => {
                     if (docSnap.exists()) {
@@ -244,7 +350,6 @@
                 return () => { unsubscribeTx(); unsubscribeBudget(); };
             }, [user]);
 
-            // Grafieken en Focus
             useEffect(() => {
                 if (user && view === 'stats') { setTimeout(() => { renderPieChart(); renderBarChart(); }, 50); }
             }, [view, transactions, selectedCategory, user]);
@@ -256,21 +361,51 @@
             // --- ACTIES ---
             const handleLogout = () => { if(confirm("Wil je uitloggen?")) signOut(auth); };
 
-            const handleAdd = async (shop, catOverride = null) => {
+            // Helper om custom shops te vinden (zodat we het logo kunnen hergebruiken)
+            const getCustomLogoForShop = (shopName) => {
+                // Zoek in recente transacties of er al eens een logo is gebruikt voor deze winkel
+                const found = transactions.find(t => t.shop === shopName && t.customLogo);
+                return found ? found.customLogo : null;
+            };
+
+            const handleAdd = async (shopData) => {
+                // shopData kan een string zijn (bestaande winkel) of een object (nieuwe winkel uit modal)
                 if (!amount) { document.getElementById('amountInput').focus(); return; }
-                let cat = 'Overig';
-                const lowerShop = shop.toLowerCase();
-                if (catOverride) cat = catOverride;
-                else {
-                    if (['colruyt', 'delhaize', 'aldi', 'ah', 'lidl', 'kruidvat'].some(s => lowerShop.includes(s))) cat = 'Boodschappen';
-                    else if (['shell', 'total', 'esso', 'lukoil', 'tesla'].some(s => lowerShop.includes(s))) cat = 'Auto';
-                    else if (['restaurant', 'bar', 'mcdo', 'burger', 'starbucks', 'frituur'].some(s => lowerShop.includes(s))) cat = 'Horeca';
-                    else if (['telenet', 'huisbaas', 'engie', 'proximus', 'luminus', 'spotify', 'netflix'].some(s => lowerShop.includes(s))) cat = 'Vaste Lasten';
-                    else if (['bol.com', 'action', 'coolblue', 'amazon', 'ikea', 'decathlon'].some(s => lowerShop.includes(s))) cat = 'Shoppen';
+                
+                let shopName = typeof shopData === 'string' ? shopData : shopData.name;
+                let category = 'Overig';
+                let customLogo = null;
+
+                if (typeof shopData === 'object') {
+                    // Via Modal
+                    category = shopData.category;
+                    customLogo = shopData.logo;
+                } else {
+                    // Via Quick Button of Search
+                    // Kijk of we al een custom logo hebben voor deze winkel
+                    customLogo = getCustomLogoForShop(shopName);
+                    
+                    // Auto-categorisatie
+                    const lowerShop = shopName.toLowerCase();
+                    if (['colruyt', 'delhaize', 'aldi', 'ah', 'lidl', 'kruidvat'].some(s => lowerShop.includes(s))) category = 'Boodschappen';
+                    else if (['shell', 'total', 'esso', 'lukoil', 'tesla'].some(s => lowerShop.includes(s))) category = 'Auto';
+                    else if (['restaurant', 'bar', 'mcdo', 'burger', 'starbucks', 'frituur'].some(s => lowerShop.includes(s))) category = 'Horeca';
+                    else if (['telenet', 'huisbaas', 'engie', 'proximus', 'luminus', 'spotify', 'netflix'].some(s => lowerShop.includes(s))) category = 'Vaste Lasten';
+                    else if (['bol.com', 'action', 'coolblue', 'amazon', 'ikea', 'decathlon'].some(s => lowerShop.includes(s))) category = 'Shoppen';
                 }
+
                 try {
-                    await addDoc(collection(db, "transactions"), { amount: parseFloat(amount), shop: shop, category: cat, date: new Date().toISOString() });
-                    setAmount(''); setShopSearch(''); if (navigator.vibrate) navigator.vibrate(50);
+                    await addDoc(collection(db, "transactions"), { 
+                        amount: parseFloat(amount), 
+                        shop: shopName, 
+                        category: category, 
+                        date: new Date().toISOString(),
+                        customLogo: customLogo // Sla base64 logo op indien aanwezig
+                    });
+                    setAmount(''); 
+                    setShopSearch(''); 
+                    setShowCreateShop(false);
+                    if (navigator.vibrate) navigator.vibrate(50);
                 } catch (e) { alert("Fout: " + e.message); }
             };
 
@@ -284,13 +419,13 @@
 
             const handleUpdateBudget = async (newVal) => {
                 const docRef = doc(db, "settings", "budget");
-                // Gebruik setDoc met merge: true, zodat hij het document aanmaakt als het niet bestaat
-                try { 
-                    await setDoc(docRef, { amount: parseFloat(newVal) }, { merge: true }); 
-                    setIsEditingBudget(false); 
-                } catch(e) { 
-                    alert("Kon budget niet opslaan: " + e.message); 
-                }
+                try { await setDoc(docRef, { amount: parseFloat(newVal) }, { merge: true }); setIsEditingBudget(false); } catch(e) { alert("Kon budget niet opslaan: " + e.message); }
+            };
+
+            const handleConfirmAmount = (e) => {
+                e.preventDefault();
+                // Verberg keyboard door focus weg te halen
+                document.getElementById('amountInput').blur();
             };
 
             // --- BEREKENINGEN ---
@@ -341,107 +476,125 @@
             if (authLoading) return <div className="h-screen flex items-center justify-center bg-gray-50 text-gray-400">Laden...</div>;
             if (!user) return <LoginScreen />;
 
-            // --- HOOFDSCHERM (ADD) ---
-            const AddScreen = () => (
-                <div className="flex flex-col h-full slide-up">
-                    <div className="flex-none flex flex-col justify-center items-center py-6 relative">
-                        <button onClick={handleLogout} className="absolute right-4 top-4 p-2 bg-gray-100 rounded-full text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
-                            <span className="material-icons-round text-sm">logout</span>
-                        </button>
-                        <label className="text-gray-400 font-medium text-xs tracking-widest uppercase mb-2">Bedrag</label>
-                        <div className="relative flex items-center justify-center">
-                            <span className="text-3xl text-gray-300 mr-2 font-light">€</span>
-                            <input id="amountInput" type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" className="text-6xl font-bold text-gray-800 bg-transparent w-40 text-center focus:outline-none placeholder-gray-200" autoFocus />
-                        </div>
-                    </div>
-                    <div className="flex-1 bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.05)] p-6 pb-24 flex flex-col overflow-hidden">
-                        <div className="mb-4 relative">
-                            <input type="text" value={shopSearch} onChange={(e) => setShopSearch(e.target.value)} placeholder="Zoek of typ winkel..." className="w-full bg-gray-50 rounded-xl px-4 py-4 pl-12 outline-none border border-transparent focus:border-blue-500 focus:bg-white transition-all font-medium text-gray-700" />
-                            <span className="material-icons-round absolute left-4 top-4 text-gray-400">search</span>
-                        </div>
-                        <div className="flex-1 overflow-y-auto no-scrollbar">
-                            <div className="grid grid-cols-2 gap-3 pb-4">
-                                {displayShops.map(shop => (
-                                    <button key={shop} onClick={() => handleAdd(shop)} className="pulse-on-click py-3 bg-white hover:bg-blue-50 hover:border-blue-200 rounded-2xl border border-gray-100 flex items-center px-4 transition-all shadow-sm gap-3 group">
-                                        <ShopLogo shopName={shop} size="w-8 h-8" textSize="text-xs" />
-                                        <span className="text-sm font-bold text-gray-700 group-hover:text-blue-700 truncate">{shop}</span>
+            return (
+                <div className="h-screen w-full max-w-md mx-auto bg-gray-50 shadow-2xl overflow-hidden flex flex-col relative">
+                    {/* Modals */}
+                    {editingTx && <EditTransactionModal transaction={editingTx} onClose={() => setEditingTx(null)} onSave={handleUpdateTx} onDelete={handleDeleteTx} />}
+                    {isEditingBudget && <BudgetModal currentBudget={monthlyBudget} onClose={() => setIsEditingBudget(false)} onSave={handleUpdateBudget} />}
+                    {showCreateShop && <CreateShopModal initialName={shopSearch} onClose={() => setShowCreateShop(false)} onSave={handleAdd} />}
+                    
+                    <div className="flex-1 overflow-hidden relative">
+                        {view === 'add' ? (
+                            <div className="flex flex-col h-full slide-up">
+                                <div className="flex-none flex flex-col justify-center items-center py-6 relative">
+                                    <button onClick={handleLogout} className="absolute right-4 top-4 p-2 bg-gray-100 rounded-full text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                                        <span className="material-icons-round text-sm">logout</span>
                                     </button>
-                                ))}
-                                {showAddNew && (
-                                    <button onClick={() => handleAdd(shopSearch)} className="col-span-2 pulse-on-click py-4 bg-blue-600 rounded-2xl flex items-center justify-center transition-colors shadow-lg shadow-blue-200 gap-2 mt-2">
-                                        <span className="material-icons-round text-white">add_circle</span>
-                                        <span className="text-sm font-bold text-white">Voeg "{shopSearch}" toe</span>
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            );
-
-            // --- STATISTIEKEN SCHERM ---
-            const StatsScreen = () => (
-                <div className="flex flex-col h-full slide-up px-4 pt-4 pb-24 overflow-y-auto no-scrollbar">
-                    <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar mb-2">
-                        {uniqueCategories.map(cat => (
-                            <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${selectedCategory === cat ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-white text-gray-600 border border-gray-100'}`}>{cat}</button>
-                        ))}
-                    </div>
-                    <div className={`rounded-3xl p-6 text-white shadow-xl mb-6 transition-colors duration-300 relative ${selectedCategory === 'Alles' ? (isOverBudget ? 'bg-gradient-to-br from-red-500 to-red-700 shadow-red-200' : 'bg-gradient-to-br from-blue-600 to-blue-800 shadow-blue-200') : 'bg-gray-800 shadow-gray-300'}`}>
-                        <div className="flex justify-between items-start mb-2">
-                            <div className="opacity-80 text-sm font-medium">{selectedCategory === 'Alles' ? 'Totaal deze maand' : `Totaal ${selectedCategory}`}</div>
-                            {selectedCategory === 'Alles' && (
-                                <button onClick={() => setIsEditingBudget(true)} className="flex items-center gap-1 bg-white/20 hover:bg-white/30 px-2 py-1 rounded-lg text-xs font-medium transition">
-                                    <span className="material-icons-round text-xs">edit</span> €{monthlyBudget}
-                                </button>
-                            )}
-                        </div>
-                        <div className="text-4xl font-bold mb-4">€ {currentTotalSpent.toFixed(2)}</div>
-                        {selectedCategory === 'Alles' && (
-                            <div>
-                                <div className="w-full bg-black/20 h-2 rounded-full overflow-hidden">
-                                    <div className={`h-full rounded-full transition-all duration-500 ${isOverBudget ? 'bg-white' : 'bg-green-400'}`} style={{width: `${budgetPct}%`}}></div>
+                                    
+                                    <label className="text-gray-400 font-medium text-xs tracking-widest uppercase mb-2">Bedrag</label>
+                                    
+                                    {/* Form wrap om 'Enter' te vangen voor keyboard close */}
+                                    <form onSubmit={handleConfirmAmount} className="relative flex items-center justify-center gap-2">
+                                        <span className="text-3xl text-gray-300 font-light">€</span>
+                                        <input 
+                                            id="amountInput" 
+                                            type="number" 
+                                            inputMode="decimal" 
+                                            value={amount} 
+                                            onChange={e => setAmount(e.target.value)} 
+                                            placeholder="0" 
+                                            className="text-6xl font-bold text-gray-800 bg-transparent w-40 text-center focus:outline-none placeholder-gray-200" 
+                                            autoFocus 
+                                        />
+                                        {/* OK knop om keyboard te sluiten */}
+                                        <button type="submit" className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg active:scale-90 transition-transform">
+                                            <span className="material-icons-round">check</span>
+                                        </button>
+                                    </form>
                                 </div>
-                                <div className="flex justify-between mt-2 text-xs font-medium opacity-90">
-                                    <span>0%</span>
-                                    {isOverBudget ? <span>OVER BUDGET: € {Math.abs(remaining).toFixed(2)}</span> : <span>Over: € {remaining.toFixed(2)}</span>}
-                                    <span>100%</span>
+
+                                <div className="flex-1 bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.05)] p-6 pb-24 flex flex-col overflow-hidden">
+                                    <div className="mb-4 relative">
+                                        <input type="text" value={shopSearch} onChange={(e) => setShopSearch(e.target.value)} placeholder="Zoek of typ winkel..." className="w-full bg-gray-50 rounded-xl px-4 py-4 pl-12 outline-none border border-transparent focus:border-blue-500 focus:bg-white transition-all font-medium text-gray-700" />
+                                        <span className="material-icons-round absolute left-4 top-4 text-gray-400">search</span>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto no-scrollbar">
+                                        <div className="grid grid-cols-2 gap-3 pb-4">
+                                            {displayShops.map(shop => (
+                                                <button key={shop} onClick={() => handleAdd(shop)} className="pulse-on-click py-3 bg-white hover:bg-blue-50 hover:border-blue-200 rounded-2xl border border-gray-100 flex items-center px-4 transition-all shadow-sm gap-3 group">
+                                                    <ShopLogo shopName={shop} customLogo={getCustomLogoForShop(shop)} size="w-8 h-8" textSize="text-xs" />
+                                                    <span className="text-sm font-bold text-gray-700 group-hover:text-blue-700 truncate">{shop}</span>
+                                                </button>
+                                            ))}
+                                            {showAddNew && (
+                                                <button onClick={() => setShowCreateShop(true)} className="col-span-2 pulse-on-click py-4 bg-blue-600 rounded-2xl flex items-center justify-center transition-colors shadow-lg shadow-blue-200 gap-2 mt-2">
+                                                    <span className="material-icons-round text-white">add_circle</span>
+                                                    <span className="text-sm font-bold text-white">Nieuwe winkel aanmaken</span>
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col h-full slide-up px-4 pt-4 pb-24 overflow-y-auto no-scrollbar">
+                                {/* Filters sticky bovenaan gezet en padding toegevoegd */}
+                                <div className="sticky top-0 bg-gray-50/95 backdrop-blur-sm z-10 py-2 -mx-4 px-4 mb-2">
+                                    <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                                        {uniqueCategories.map(cat => (
+                                            <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors border ${selectedCategory === cat ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200'}`}>{cat}</button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className={`rounded-3xl p-6 text-white shadow-xl mb-6 transition-colors duration-300 relative ${selectedCategory === 'Alles' ? (isOverBudget ? 'bg-gradient-to-br from-red-500 to-red-700 shadow-red-200' : 'bg-gradient-to-br from-green-500 to-green-700 shadow-green-200') : 'bg-gray-800 shadow-gray-300'}`}>
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div className="opacity-90 text-sm font-medium">{selectedCategory === 'Alles' ? 'Totaal deze maand' : `Totaal ${selectedCategory}`}</div>
+                                        {selectedCategory === 'Alles' && (
+                                            <button onClick={() => setIsEditingBudget(true)} className="flex items-center gap-1 bg-white/20 hover:bg-white/30 px-2 py-1 rounded-lg text-xs font-medium transition">
+                                                <span className="material-icons-round text-xs">edit</span> €{monthlyBudget}
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="text-4xl font-bold mb-4">€ {currentTotalSpent.toFixed(2)}</div>
+                                    {selectedCategory === 'Alles' && (
+                                        <div>
+                                            <div className="w-full bg-black/20 h-2 rounded-full overflow-hidden">
+                                                <div className={`h-full rounded-full transition-all duration-500 ${isOverBudget ? 'bg-white' : 'bg-white'}`} style={{width: `${budgetPct}%`}}></div>
+                                            </div>
+                                            <div className="flex justify-between mt-2 text-xs font-medium opacity-90">
+                                                <span>0%</span>
+                                                {isOverBudget ? <span>OVER BUDGET: € {Math.abs(remaining).toFixed(2)}</span> : <span>Over: € {remaining.toFixed(2)}</span>}
+                                                <span>100%</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                <div className="bg-white rounded-3xl p-5 shadow-sm mb-6">
+                                    <h3 className="text-gray-800 font-bold mb-4 text-sm uppercase">{selectedCategory === 'Alles' ? 'Verdeling' : `Winkels`}</h3>
+                                    <div className="h-40"><canvas ref={pieChartRef}></canvas></div>
+                                </div>
+                                <div className="bg-white rounded-3xl p-5 shadow-sm mb-6">
+                                    <h3 className="text-gray-800 font-bold mb-4 text-sm uppercase">Trend</h3>
+                                    <div className="h-56"><canvas ref={barChartRef}></canvas></div>
+                                </div>
+                                <div className="space-y-3">
+                                    {filteredTransactions.slice(0, 15).map(t => (
+                                        <div key={t.id} onClick={() => setEditingTx(t)} className="bg-white p-3 rounded-2xl flex justify-between items-center shadow-sm border border-gray-50 active:bg-gray-50 cursor-pointer">
+                                            <div className="flex items-center gap-3">
+                                                <ShopLogo shopName={t.shop} customLogo={getCustomLogoForShop(t.shop)} />
+                                                <div>
+                                                    <div className="font-bold text-gray-800">{t.shop}</div>
+                                                    <div className="text-xs text-gray-400">{t.category} • {new Date(t.date).toLocaleDateString()}</div>
+                                                </div>
+                                            </div>
+                                            <div className="font-bold text-gray-900">- €{t.amount.toFixed(2)}</div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         )}
-                    </div>
-                    <div className="bg-white rounded-3xl p-5 shadow-sm mb-6">
-                        <h3 className="text-gray-800 font-bold mb-4 text-sm uppercase">{selectedCategory === 'Alles' ? 'Verdeling' : `Winkels`}</h3>
-                        <div className="h-40"><canvas ref={pieChartRef}></canvas></div>
-                    </div>
-                    <div className="bg-white rounded-3xl p-5 shadow-sm mb-6">
-                        <h3 className="text-gray-800 font-bold mb-4 text-sm uppercase">Trend</h3>
-                        <div className="h-56"><canvas ref={barChartRef}></canvas></div>
-                    </div>
-                    <div className="space-y-3">
-                        {filteredTransactions.slice(0, 15).map(t => (
-                            <div key={t.id} onClick={() => setEditingTx(t)} className="bg-white p-3 rounded-2xl flex justify-between items-center shadow-sm border border-gray-50 active:bg-gray-50 cursor-pointer">
-                                <div className="flex items-center gap-3">
-                                    <ShopLogo shopName={t.shop} />
-                                    <div>
-                                        <div className="font-bold text-gray-800">{t.shop}</div>
-                                        <div className="text-xs text-gray-400">{t.category} • {new Date(t.date).toLocaleDateString()}</div>
-                                    </div>
-                                </div>
-                                <div className="font-bold text-gray-900">- €{t.amount.toFixed(2)}</div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-
-            return (
-                <div className="h-screen w-full max-w-md mx-auto bg-gray-50 shadow-2xl overflow-hidden flex flex-col relative">
-                    {editingTx && <EditTransactionModal transaction={editingTx} onClose={() => setEditingTx(null)} onSave={handleUpdateTx} onDelete={handleDeleteTx} />}
-                    {isEditingBudget && <BudgetModal currentBudget={monthlyBudget} onClose={() => setIsEditingBudget(false)} onSave={handleUpdateBudget} />}
-                    
-                    <div className="flex-1 overflow-hidden relative">
-                        {view === 'add' ? <AddScreen /> : <StatsScreen />}
                     </div>
                     <div className="bg-white/90 backdrop-blur-md border-t border-gray-100 absolute bottom-0 w-full pb-6 pt-3 px-6 flex justify-around z-20">
                         <button onClick={() => setView('add')} className={`flex flex-col items-center transition-all ${view === 'add' ? '-translate-y-2' : 'opacity-50'}`}><div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-1 shadow-lg ${view === 'add' ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-white text-gray-600 border'}`}><span className="material-icons-round">add</span></div><span className="text-[10px] font-bold text-gray-500">Nieuw</span></button>
