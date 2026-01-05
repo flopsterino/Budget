@@ -82,13 +82,29 @@
             });
         };
 
+        // Veilige nummerconversie (komma naar punt) voor opslag
+        const parseAmount = (value) => {
+            if (!value) return 0;
+            const floatVal = parseFloat(value.toString().replace(',', '.'));
+            return isNaN(floatVal) ? 0 : floatVal;
+        };
+
+        // Helper voor input velden: forceert correcte opmaak tijdens typen
+        const handleAmountInput = (value, setter) => {
+            // Vervang komma direct door punt
+            let normalized = value.replace(',', '.');
+            // Sta alleen cijfers en maximaal één punt toe
+            if (/^\d*\.?\d*$/.test(normalized)) {
+                setter(normalized);
+            }
+        };
+
         // Kleuren genereren voor dynamische categorieën
         const stringToColor = (str) => {
             let hash = 0;
             for (let i = 0; i < str.length; i++) {
                 hash = str.charCodeAt(i) + ((hash << 5) - hash);
             }
-            // Zorg voor aangename pastelkleuren (HSL)
             const h = Math.abs(hash % 360);
             return `hsl(${h}, 70%, 60%)`;
         };
@@ -179,7 +195,6 @@
             return <div className={`${size} rounded-full ${colorClass} flex items-center justify-center font-bold ${textSize} shrink-0 shadow-sm border border-white`}>{(shopName?.charAt(0) || '?').toUpperCase()}</div>;
         };
 
-        // --- NEW: Category Input Component (Dropdown + Type) ---
         const CategoryInput = ({ value, onChange, existingCategories }) => {
             return (
                 <div className="relative">
@@ -201,7 +216,7 @@
         // --- MODALS ---
         const CreateShopModal = ({ initialName, onClose, onSave, existingCategories }) => {
             const [name, setName] = useState(initialName || '');
-            const [category, setCategory] = useState(''); // Leeg start
+            const [category, setCategory] = useState('');
             const [logoPreview, setLogoPreview] = useState(null);
             const [uploading, setUploading] = useState(false);
 
@@ -283,7 +298,13 @@
                         </div>
                         <div>
                             <label className="text-xs font-bold text-gray-400 uppercase">Bedrag (€)</label>
-                            <input type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: parseFloat(e.target.value)})} className="w-full text-3xl font-bold border-b py-2 focus:border-blue-500 focus:outline-none" />
+                            <input 
+                                type="text" 
+                                inputMode="decimal"
+                                value={formData.amount} 
+                                onChange={e => handleAmountInput(e.target.value, val => setFormData({...formData, amount: val}))}
+                                className="w-full text-3xl font-bold border-b py-2 focus:border-blue-500 focus:outline-none" 
+                            />
                         </div>
                         <div>
                             <label className="text-xs font-bold text-gray-400 uppercase">Winkel</label>
@@ -299,7 +320,7 @@
                         </div>
                         <div className="flex gap-3 mt-4">
                             <button onClick={() => onDelete(transaction.id)} className="flex-1 py-3 rounded-xl border border-red-100 text-red-600 font-bold hover:bg-red-50">Verwijderen</button>
-                            <button onClick={() => onSave(formData.id, formData)} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg">Opslaan</button>
+                            <button onClick={() => onSave(formData.id, { ...formData, amount: parseAmount(formData.amount) })} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg">Opslaan</button>
                         </div>
                     </div>
                 </div>
@@ -315,9 +336,16 @@
                          <h3 className="font-bold text-lg text-gray-800 mb-4">Maandbudget</h3>
                          <div className="relative inline-block mb-6">
                             <span className="absolute left-0 top-1/2 -translate-y-1/2 text-xl text-gray-400">€</span>
-                            <input type="number" value={val} onChange={e => setVal(e.target.value)} className="pl-6 w-32 text-4xl font-bold text-center border-b-2 border-blue-500 focus:outline-none" autoFocus />
+                            <input 
+                                type="text" 
+                                inputMode="decimal"
+                                value={val} 
+                                onChange={e => handleAmountInput(e.target.value, setVal)}
+                                className="pl-6 w-32 text-4xl font-bold text-center border-b-2 border-blue-500 focus:outline-none" 
+                                autoFocus 
+                            />
                          </div>
-                         <button onClick={() => onSave(val)} className="w-full py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg">Opslaan</button>
+                         <button onClick={() => onSave(parseAmount(val))} className="w-full py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg">Opslaan</button>
                     </div>
                 </div>
             );
@@ -325,11 +353,9 @@
 
         // --- HOOFD APP LOGICA ---
         function App() {
-            // AUTH STATE
             const [user, setUser] = useState(null);
             const [authLoading, setAuthLoading] = useState(true);
 
-            // APP STATE
             const [view, setView] = useState('add'); 
             const [amount, setAmount] = useState('');
             const [transactions, setTransactions] = useState([]);
@@ -346,7 +372,6 @@
             const barChartRef = useRef(null);
             const barChartInstance = useRef(null);
 
-            // --- 1. AUTH CHECK & PERSISTENCE ---
             useEffect(() => {
                 const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
                     setUser(currentUser);
@@ -355,7 +380,6 @@
                 return () => unsubscribe();
             }, []);
 
-            // --- 2. DATA SYNC (ALLEEN ALS INGELOGD) ---
             useEffect(() => {
                 if (!db || !user) return;
                 
@@ -383,7 +407,6 @@
                 if (user && view === 'add') { setShopSearch(''); setTimeout(() => document.getElementById('amountInput')?.focus(), 100); }
             }, [view, user]);
 
-            // --- ACTIES ---
             const handleLogout = () => { if(confirm("Wil je uitloggen?")) signOut(auth); };
 
             const getCustomLogoForShop = (shopName) => {
@@ -391,7 +414,6 @@
                 return found ? found.customLogo : null;
             };
 
-            // Dynamische lijst met categorieën gebaseerd op geschiedenis + standaard set
             const availableCategories = useMemo(() => {
                 const defaults = ['Boodschappen', 'Auto', 'Horeca', 'Vaste Lasten', 'Shoppen', 'Overig'];
                 const used = transactions.map(t => t.category);
@@ -399,7 +421,9 @@
             }, [transactions]);
 
             const handleAdd = async (shopData) => {
-                if (!amount || parseFloat(amount) === 0) { 
+                const parsedVal = parseAmount(amount);
+                
+                if (!amount || parsedVal === 0) { 
                     alert("Vul eerst een bedrag in.");
                     if (typeof shopData === 'object') setShowCreateShop(false);
                     setTimeout(() => document.getElementById('amountInput')?.focus(), 100);
@@ -411,18 +435,14 @@
                 let customLogo = null;
 
                 if (typeof shopData === 'object') {
-                    // Via Modal (Nieuwe winkel)
                     category = shopData.category || 'Overig';
                     customLogo = shopData.logo;
                 } else {
-                    // Via Quick Button of Search (Bestaande of bekende winkel)
                     customLogo = getCustomLogoForShop(shopName);
-                    // Probeer categorie uit geschiedenis te halen
                     const lastTx = transactions.find(t => t.shop === shopName);
                     if (lastTx) {
                         category = lastTx.category;
                     } else {
-                        // Fallback auto-detectie (kan nog steeds handig zijn)
                         const lowerShop = shopName.toLowerCase();
                         if (['colruyt', 'delhaize', 'aldi', 'ah', 'lidl'].some(s => lowerShop.includes(s))) category = 'Boodschappen';
                         else if (['shell', 'total', 'esso'].some(s => lowerShop.includes(s))) category = 'Auto';
@@ -432,7 +452,7 @@
 
                 try {
                     await addDoc(collection(db, "transactions"), { 
-                        amount: parseFloat(amount), 
+                        amount: parsedVal, 
                         shop: shopName, 
                         category: category, 
                         date: new Date().toISOString(),
@@ -463,12 +483,10 @@
                 document.getElementById('amountInput').blur();
             };
 
-            // --- BEREKENINGEN ---
             const { displayShops, showAddNew } = useMemo(() => {
                 const counts = {}; transactions.forEach(t => { counts[t.shop] = (counts[t.shop] || 0) + 1; });
                 const allSortedShops = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
                 
-                // GEEN standaardlijst meer. Alleen geschiedenis.
                 if (!shopSearch) {
                     return { displayShops: allSortedShops.slice(0, 8), showAddNew: false };
                 }
@@ -489,11 +507,9 @@
             const isOverBudget = currentTotalSpent > monthlyBudget;
             const remaining = monthlyBudget - currentTotalSpent;
 
-            // --- GRAFIEKEN ---
             const renderPieChart = () => {
                 if (!pieChartRef.current || pieChartInstance.current) { if(pieChartInstance.current) pieChartInstance.current.destroy(); }
                 const totals = {}; filteredTransactions.forEach(t => { const key = selectedCategory === 'Alles' ? t.category : t.shop; totals[key] = (totals[key] || 0) + t.amount; });
-                // Genereer kleuren dynamisch
                 const colors = Object.keys(totals).map(key => stringToColor(key));
                 
                 const ctx = pieChartRef.current.getContext('2d');
@@ -528,9 +544,19 @@
                                     </button>
                                     
                                     <label className="text-gray-400 font-medium text-xs tracking-widest uppercase mb-2">Bedrag</label>
+                                    
                                     <form onSubmit={handleConfirmAmount} className="relative flex items-center justify-center gap-2">
                                         <span className="text-3xl text-gray-300 font-light">€</span>
-                                        <input id="amountInput" type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" className="text-6xl font-bold text-gray-800 bg-transparent w-40 text-center focus:outline-none placeholder-gray-200" autoFocus />
+                                        <input 
+                                            id="amountInput" 
+                                            type="text" 
+                                            inputMode="decimal" 
+                                            value={amount} 
+                                            onChange={e => handleAmountInput(e.target.value, setAmount)} 
+                                            placeholder="0" 
+                                            className="text-6xl font-bold text-gray-800 bg-transparent w-40 text-center focus:outline-none placeholder-gray-200" 
+                                            autoFocus 
+                                        />
                                         <button type="submit" className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg active:scale-90 transition-transform"><span className="material-icons-round">check</span></button>
                                     </form>
                                 </div>
@@ -542,7 +568,6 @@
                                     </div>
                                     <div className="flex-1 overflow-y-auto no-scrollbar">
                                         <div className="grid grid-cols-2 gap-3 pb-4">
-                                            {/* Geen zoekopdracht en geen geschiedenis? Toon startbericht */}
                                             {displayShops.length === 0 && !shopSearch && (
                                                 <div className="col-span-2 text-center text-gray-400 py-10 flex flex-col items-center">
                                                     <span className="material-icons-round text-4xl mb-2 text-gray-300">storefront</span>
