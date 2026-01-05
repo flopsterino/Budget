@@ -39,7 +39,7 @@
 
         const { useState, useEffect, useRef, useMemo } = React;
 
-        // --- JOUW ORIGINELE CONFIGURATIE ---
+        // --- JOUW SPECIFIEKE CONFIGURATIE ---
         const firebaseConfig = {
             apiKey: "AIzaSyDuGdWmbNVNV0Yo5tlA-VFab1ZHGEOgvgA",
             authDomain: "budgetplan-bfd60.firebaseapp.com",
@@ -60,7 +60,6 @@
         }
 
         // --- HELPER FUNCTIES ---
-        // Resize afbeelding naar base64 string om opslag te sparen
         const processImage = (file) => {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -70,7 +69,7 @@
                     img.src = event.target.result;
                     img.onload = () => {
                         const canvas = document.createElement('canvas');
-                        const MAX_WIDTH = 150; // Klein formaat voor logo
+                        const MAX_WIDTH = 150; 
                         const scaleSize = MAX_WIDTH / img.width;
                         canvas.width = MAX_WIDTH;
                         canvas.height = img.height * scaleSize;
@@ -81,6 +80,17 @@
                 };
                 reader.onerror = error => reject(error);
             });
+        };
+
+        // Kleuren genereren voor dynamische categorieën
+        const stringToColor = (str) => {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            // Zorg voor aangename pastelkleuren (HSL)
+            const h = Math.abs(hash % 360);
+            return `hsl(${h}, 70%, 60%)`;
         };
 
         // --- COMPONENTS ---
@@ -143,16 +153,13 @@
             'Decathlon': 'decathlon.be', 'Kruidvat': 'kruidvat.be'
         };
 
-        // Logo component met ondersteuning voor custom (base64) logo's
         const ShopLogo = ({ shopName, customLogo, size = "w-10 h-10", textSize = "text-sm" }) => {
             const [imgError, setImgError] = useState(false);
             
-            // 1. Custom logo (indien aanwezig)
             if (customLogo) {
                 return <img src={customLogo} alt={shopName} className={`${size} rounded-full object-cover bg-white shadow-sm border border-gray-100 shrink-0`} />;
             }
 
-            // 2. Auto-fetch logic
             const findDomain = (name) => {
                 if (!name) return null;
                 if (SHOP_DOMAINS[name]) return SHOP_DOMAINS[name];
@@ -167,18 +174,34 @@
             
             if (logoUrl && !imgError) return <img src={logoUrl} alt={shopName} className={`${size} rounded-full object-contain bg-white shadow-sm border border-gray-100 shrink-0`} onError={() => setImgError(true)} />;
             
-            // 3. Fallback Initiaal
             const colors = ['bg-blue-100 text-blue-600', 'bg-green-100 text-green-600', 'bg-yellow-100 text-yellow-600', 'bg-purple-100 text-purple-600', 'bg-pink-100 text-pink-600'];
             const colorClass = colors[(shopName?.length || 0) % colors.length];
             return <div className={`${size} rounded-full ${colorClass} flex items-center justify-center font-bold ${textSize} shrink-0 shadow-sm border border-white`}>{(shopName?.charAt(0) || '?').toUpperCase()}</div>;
         };
 
-        const CATEGORY_COLORS = { 'Boodschappen': '#3b82f6', 'Auto': '#ef4444', 'Horeca': '#f59e0b', 'Vaste Lasten': '#10b981', 'Shoppen': '#8b5cf6', 'Overig': '#9ca3af' };
+        // --- NEW: Category Input Component (Dropdown + Type) ---
+        const CategoryInput = ({ value, onChange, existingCategories }) => {
+            return (
+                <div className="relative">
+                    <input 
+                        type="text" 
+                        list="category-suggestions" 
+                        value={value} 
+                        onChange={onChange} 
+                        className="w-full p-2 border-b font-medium bg-transparent focus:border-blue-500 outline-none" 
+                        placeholder="Typ of kies categorie..."
+                    />
+                    <datalist id="category-suggestions">
+                        {existingCategories.map(cat => <option key={cat} value={cat} />)}
+                    </datalist>
+                </div>
+            );
+        };
 
-        // --- NIEUW: New Shop Modal ---
-        const CreateShopModal = ({ initialName, onClose, onSave }) => {
+        // --- MODALS ---
+        const CreateShopModal = ({ initialName, onClose, onSave, existingCategories }) => {
             const [name, setName] = useState(initialName || '');
-            const [category, setCategory] = useState('Overig');
+            const [category, setCategory] = useState(''); // Leeg start
             const [logoPreview, setLogoPreview] = useState(null);
             const [uploading, setUploading] = useState(false);
 
@@ -206,7 +229,6 @@
                         </div>
                         
                         <div className="flex flex-col gap-4">
-                            {/* Logo Upload */}
                             <div className="flex items-center gap-4">
                                 <div className="w-16 h-16 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative">
                                     {logoPreview ? (
@@ -222,22 +244,23 @@
                                 </div>
                             </div>
 
-                            {/* Inputs */}
                             <div>
                                 <label className="text-xs font-bold text-gray-400 uppercase">Naam</label>
-                                <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 border-b font-medium focus:border-blue-500 outline-none" placeholder="Naam van winkel" />
+                                <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 border-b font-medium focus:border-blue-500 outline-none" placeholder="bv. Bakker Janssens" />
                             </div>
                             
                             <div>
                                 <label className="text-xs font-bold text-gray-400 uppercase">Categorie</label>
-                                <select value={category} onChange={e => setCategory(e.target.value)} className="w-full p-2 border-b font-medium bg-transparent focus:border-blue-500 outline-none">
-                                    {Object.keys(CATEGORY_COLORS).map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                </select>
+                                <CategoryInput 
+                                    value={category} 
+                                    onChange={e => setCategory(e.target.value)} 
+                                    existingCategories={existingCategories} 
+                                />
                             </div>
 
                             <button 
-                                onClick={() => onSave({ name, category, logo: logoPreview })} 
-                                className="mt-2 w-full py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg"
+                                onClick={() => onSave({ name, category: category || 'Overig', logo: logoPreview })} 
+                                className="mt-2 w-full py-3 rounded-xl bg-blue-600 text-white font-bold shadow-lg active:scale-95 transition-transform"
                                 disabled={!name}
                             >
                                 Aanmaken & Toevoegen
@@ -248,7 +271,7 @@
             );
         };
 
-        const EditTransactionModal = ({ transaction, onClose, onSave, onDelete }) => {
+        const EditTransactionModal = ({ transaction, onClose, onSave, onDelete, existingCategories }) => {
             const [formData, setFormData] = useState({ ...transaction });
             return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center px-4 fade-in">
@@ -268,9 +291,11 @@
                         </div>
                         <div>
                             <label className="text-xs font-bold text-gray-400 uppercase">Categorie</label>
-                            <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full text-lg font-medium border-b py-2 bg-transparent">
-                                {Object.keys(CATEGORY_COLORS).map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                            </select>
+                            <CategoryInput 
+                                value={formData.category} 
+                                onChange={e => setFormData({...formData, category: e.target.value})} 
+                                existingCategories={existingCategories} 
+                            />
                         </div>
                         <div className="flex gap-3 mt-4">
                             <button onClick={() => onDelete(transaction.id)} className="flex-1 py-3 rounded-xl border border-red-100 text-red-600 font-bold hover:bg-red-50">Verwijderen</button>
@@ -314,7 +339,7 @@
             
             const [editingTx, setEditingTx] = useState(null);
             const [isEditingBudget, setIsEditingBudget] = useState(false);
-            const [showCreateShop, setShowCreateShop] = useState(false); // Nieuw: Create modal state
+            const [showCreateShop, setShowCreateShop] = useState(false);
 
             const pieChartRef = useRef(null);
             const pieChartInstance = useRef(null);
@@ -361,37 +386,48 @@
             // --- ACTIES ---
             const handleLogout = () => { if(confirm("Wil je uitloggen?")) signOut(auth); };
 
-            // Helper om custom shops te vinden (zodat we het logo kunnen hergebruiken)
             const getCustomLogoForShop = (shopName) => {
-                // Zoek in recente transacties of er al eens een logo is gebruikt voor deze winkel
                 const found = transactions.find(t => t.shop === shopName && t.customLogo);
                 return found ? found.customLogo : null;
             };
 
+            // Dynamische lijst met categorieën gebaseerd op geschiedenis + standaard set
+            const availableCategories = useMemo(() => {
+                const defaults = ['Boodschappen', 'Auto', 'Horeca', 'Vaste Lasten', 'Shoppen', 'Overig'];
+                const used = transactions.map(t => t.category);
+                return [...new Set([...defaults, ...used])].sort();
+            }, [transactions]);
+
             const handleAdd = async (shopData) => {
-                // shopData kan een string zijn (bestaande winkel) of een object (nieuwe winkel uit modal)
-                if (!amount) { document.getElementById('amountInput').focus(); return; }
+                if (!amount || parseFloat(amount) === 0) { 
+                    alert("Vul eerst een bedrag in.");
+                    if (typeof shopData === 'object') setShowCreateShop(false);
+                    setTimeout(() => document.getElementById('amountInput')?.focus(), 100);
+                    return; 
+                }
                 
                 let shopName = typeof shopData === 'string' ? shopData : shopData.name;
                 let category = 'Overig';
                 let customLogo = null;
 
                 if (typeof shopData === 'object') {
-                    // Via Modal
-                    category = shopData.category;
+                    // Via Modal (Nieuwe winkel)
+                    category = shopData.category || 'Overig';
                     customLogo = shopData.logo;
                 } else {
-                    // Via Quick Button of Search
-                    // Kijk of we al een custom logo hebben voor deze winkel
+                    // Via Quick Button of Search (Bestaande of bekende winkel)
                     customLogo = getCustomLogoForShop(shopName);
-                    
-                    // Auto-categorisatie
-                    const lowerShop = shopName.toLowerCase();
-                    if (['colruyt', 'delhaize', 'aldi', 'ah', 'lidl', 'kruidvat'].some(s => lowerShop.includes(s))) category = 'Boodschappen';
-                    else if (['shell', 'total', 'esso', 'lukoil', 'tesla'].some(s => lowerShop.includes(s))) category = 'Auto';
-                    else if (['restaurant', 'bar', 'mcdo', 'burger', 'starbucks', 'frituur'].some(s => lowerShop.includes(s))) category = 'Horeca';
-                    else if (['telenet', 'huisbaas', 'engie', 'proximus', 'luminus', 'spotify', 'netflix'].some(s => lowerShop.includes(s))) category = 'Vaste Lasten';
-                    else if (['bol.com', 'action', 'coolblue', 'amazon', 'ikea', 'decathlon'].some(s => lowerShop.includes(s))) category = 'Shoppen';
+                    // Probeer categorie uit geschiedenis te halen
+                    const lastTx = transactions.find(t => t.shop === shopName);
+                    if (lastTx) {
+                        category = lastTx.category;
+                    } else {
+                        // Fallback auto-detectie (kan nog steeds handig zijn)
+                        const lowerShop = shopName.toLowerCase();
+                        if (['colruyt', 'delhaize', 'aldi', 'ah', 'lidl'].some(s => lowerShop.includes(s))) category = 'Boodschappen';
+                        else if (['shell', 'total', 'esso'].some(s => lowerShop.includes(s))) category = 'Auto';
+                        else category = 'Overig';
+                    }
                 }
 
                 try {
@@ -400,7 +436,7 @@
                         shop: shopName, 
                         category: category, 
                         date: new Date().toISOString(),
-                        customLogo: customLogo // Sla base64 logo op indien aanwezig
+                        customLogo: customLogo 
                     });
                     setAmount(''); 
                     setShopSearch(''); 
@@ -424,7 +460,6 @@
 
             const handleConfirmAmount = (e) => {
                 e.preventDefault();
-                // Verberg keyboard door focus weg te halen
                 document.getElementById('amountInput').blur();
             };
 
@@ -432,10 +467,10 @@
             const { displayShops, showAddNew } = useMemo(() => {
                 const counts = {}; transactions.forEach(t => { counts[t.shop] = (counts[t.shop] || 0) + 1; });
                 const allSortedShops = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+                
+                // GEEN standaardlijst meer. Alleen geschiedenis.
                 if (!shopSearch) {
-                    const defaultShops = ['Colruyt', 'Delhaize', 'AH', 'Shell', 'Horeca', 'Bol.com'];
-                    const topShops = allSortedShops.length > 0 ? allSortedShops.slice(0, 6) : defaultShops;
-                    return { displayShops: topShops, showAddNew: false };
+                    return { displayShops: allSortedShops.slice(0, 8), showAddNew: false };
                 }
                 const filtered = allSortedShops.filter(s => s.toLowerCase().includes(shopSearch.toLowerCase()));
                 const exactMatch = filtered.some(s => s.toLowerCase() === shopSearch.toLowerCase());
@@ -449,7 +484,7 @@
                 return dateMatch && catMatch;
             });
             const currentTotalSpent = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
-            const uniqueCategories = ['Alles', ...new Set(transactions.map(t => t.category))];
+            const uniqueCategories = ['Alles', ...new Set(transactions.map(t => t.category))].sort();
             const budgetPct = Math.min((currentTotalSpent / monthlyBudget) * 100, 100);
             const isOverBudget = currentTotalSpent > monthlyBudget;
             const remaining = monthlyBudget - currentTotalSpent;
@@ -458,8 +493,11 @@
             const renderPieChart = () => {
                 if (!pieChartRef.current || pieChartInstance.current) { if(pieChartInstance.current) pieChartInstance.current.destroy(); }
                 const totals = {}; filteredTransactions.forEach(t => { const key = selectedCategory === 'Alles' ? t.category : t.shop; totals[key] = (totals[key] || 0) + t.amount; });
+                // Genereer kleuren dynamisch
+                const colors = Object.keys(totals).map(key => stringToColor(key));
+                
                 const ctx = pieChartRef.current.getContext('2d');
-                pieChartInstance.current = new Chart(ctx, { type: 'doughnut', data: { labels: Object.keys(totals), datasets: [{ data: Object.values(totals), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1'], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 10 } } } } } });
+                pieChartInstance.current = new Chart(ctx, { type: 'doughnut', data: { labels: Object.keys(totals), datasets: [{ data: Object.values(totals), backgroundColor: colors, borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 10 } } } } } });
             };
             const renderBarChart = () => {
                 if (!barChartRef.current || barChartInstance.current) { if(barChartInstance.current) barChartInstance.current.destroy(); }
@@ -467,21 +505,19 @@
                 const sortedTx = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
                 sortedTx.forEach(t => { if (selectedCategory !== 'Alles' && t.category !== selectedCategory) return; const monthKey = t.date.slice(0, 7); if (!monthlyData[monthKey]) monthlyData[monthKey] = {}; const key = selectedCategory === 'Alles' ? t.category : 'Totaal'; monthlyData[monthKey][key] = (monthlyData[monthKey][key] || 0) + t.amount; allCategories.add(key); });
                 const labels = Object.keys(monthlyData).sort(); const categories = Array.from(allCategories);
-                const datasets = categories.map(cat => ({ label: cat, data: labels.map(month => monthlyData[month][cat] || 0), backgroundColor: selectedCategory === 'Alles' ? (CATEGORY_COLORS[cat] || '#ccc') : (CATEGORY_COLORS[selectedCategory] || '#3b82f6'), borderRadius: 4 }));
+                const datasets = categories.map(cat => ({ label: cat, data: labels.map(month => monthlyData[month][cat] || 0), backgroundColor: stringToColor(cat), borderRadius: 4 }));
                 const ctx = barChartRef.current.getContext('2d');
                 barChartInstance.current = new Chart(ctx, { type: 'bar', data: { labels, datasets }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true } }, plugins: { legend: { display: false } } } });
             };
 
-            // --- RENDER CONDITIES ---
             if (authLoading) return <div className="h-screen flex items-center justify-center bg-gray-50 text-gray-400">Laden...</div>;
             if (!user) return <LoginScreen />;
 
             return (
                 <div className="h-screen w-full max-w-md mx-auto bg-gray-50 shadow-2xl overflow-hidden flex flex-col relative">
-                    {/* Modals */}
-                    {editingTx && <EditTransactionModal transaction={editingTx} onClose={() => setEditingTx(null)} onSave={handleUpdateTx} onDelete={handleDeleteTx} />}
+                    {editingTx && <EditTransactionModal transaction={editingTx} onClose={() => setEditingTx(null)} onSave={handleUpdateTx} onDelete={handleDeleteTx} existingCategories={availableCategories} />}
                     {isEditingBudget && <BudgetModal currentBudget={monthlyBudget} onClose={() => setIsEditingBudget(false)} onSave={handleUpdateBudget} />}
-                    {showCreateShop && <CreateShopModal initialName={shopSearch} onClose={() => setShowCreateShop(false)} onSave={handleAdd} />}
+                    {showCreateShop && <CreateShopModal initialName={shopSearch} onClose={() => setShowCreateShop(false)} onSave={handleAdd} existingCategories={availableCategories} />}
                     
                     <div className="flex-1 overflow-hidden relative">
                         {view === 'add' ? (
@@ -492,24 +528,10 @@
                                     </button>
                                     
                                     <label className="text-gray-400 font-medium text-xs tracking-widest uppercase mb-2">Bedrag</label>
-                                    
-                                    {/* Form wrap om 'Enter' te vangen voor keyboard close */}
                                     <form onSubmit={handleConfirmAmount} className="relative flex items-center justify-center gap-2">
                                         <span className="text-3xl text-gray-300 font-light">€</span>
-                                        <input 
-                                            id="amountInput" 
-                                            type="number" 
-                                            inputMode="decimal" 
-                                            value={amount} 
-                                            onChange={e => setAmount(e.target.value)} 
-                                            placeholder="0" 
-                                            className="text-6xl font-bold text-gray-800 bg-transparent w-40 text-center focus:outline-none placeholder-gray-200" 
-                                            autoFocus 
-                                        />
-                                        {/* OK knop om keyboard te sluiten */}
-                                        <button type="submit" className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg active:scale-90 transition-transform">
-                                            <span className="material-icons-round">check</span>
-                                        </button>
+                                        <input id="amountInput" type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" className="text-6xl font-bold text-gray-800 bg-transparent w-40 text-center focus:outline-none placeholder-gray-200" autoFocus />
+                                        <button type="submit" className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg active:scale-90 transition-transform"><span className="material-icons-round">check</span></button>
                                     </form>
                                 </div>
 
@@ -520,6 +542,15 @@
                                     </div>
                                     <div className="flex-1 overflow-y-auto no-scrollbar">
                                         <div className="grid grid-cols-2 gap-3 pb-4">
+                                            {/* Geen zoekopdracht en geen geschiedenis? Toon startbericht */}
+                                            {displayShops.length === 0 && !shopSearch && (
+                                                <div className="col-span-2 text-center text-gray-400 py-10 flex flex-col items-center">
+                                                    <span className="material-icons-round text-4xl mb-2 text-gray-300">storefront</span>
+                                                    <p>Nog geen winkels.</p>
+                                                    <p className="text-xs">Typ hierboven om te beginnen.</p>
+                                                </div>
+                                            )}
+
                                             {displayShops.map(shop => (
                                                 <button key={shop} onClick={() => handleAdd(shop)} className="pulse-on-click py-3 bg-white hover:bg-blue-50 hover:border-blue-200 rounded-2xl border border-gray-100 flex items-center px-4 transition-all shadow-sm gap-3 group">
                                                     <ShopLogo shopName={shop} customLogo={getCustomLogoForShop(shop)} size="w-8 h-8" textSize="text-xs" />
@@ -538,7 +569,6 @@
                             </div>
                         ) : (
                             <div className="flex flex-col h-full slide-up px-4 pt-4 pb-24 overflow-y-auto no-scrollbar">
-                                {/* Filters sticky bovenaan gezet en padding toegevoegd */}
                                 <div className="sticky top-0 bg-gray-50/95 backdrop-blur-sm z-10 py-2 -mx-4 px-4 mb-2">
                                     <div className="flex gap-2 overflow-x-auto no-scrollbar">
                                         {uniqueCategories.map(cat => (
