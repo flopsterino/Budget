@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Ons Budget</title>
     
-    <!-- PWA Manifest link (Zorgt dat het als echte app opent) -->
+    <!-- Zorg dat je manifest.json ook in de map staat voor het app-icoon -->
     <link rel="manifest" href="manifest.json">
     
     <!-- Libraries -->
@@ -15,7 +15,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
-    <!-- Icon voor iOS -->
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2382/2382461.png">
 
     <style>
@@ -36,11 +35,12 @@
 
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, setDoc, deleteDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         const { useState, useEffect, useRef, useMemo } = React;
 
-        // --- 1. JOUW FIREBASE CONFIG ---
+        // --- JOUW CONFIGURATIE ---
         const firebaseConfig = {
             apiKey: "AIzaSyDuGdWmbNVNV0Yo5tlA-VFab1ZHGEOgvgA",
             authDomain: "budgetplan-bfd60.firebaseapp.com",
@@ -49,18 +49,66 @@
             messagingSenderId: "823007347632",
             appId: "1:823007347632:web:c29b05e9b3a263136e0c75"
         };
-        // -------------------------------
 
         // Init Firebase
-        let db;
+        let db, auth;
         try {
             const app = initializeApp(firebaseConfig);
             db = getFirestore(app);
+            auth = getAuth(app);
         } catch (error) {
-            console.error("Firebase niet goed ingesteld. Heb je de config ingevuld?", error);
+            console.error("Firebase Init Error", error);
         }
 
-        // --- DOMAIN MAPPING ---
+        // --- HELPER COMPONENTEN (Login, Logos, Modals) ---
+
+        const LoginScreen = () => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+                try {
+                    await signInWithEmailAndPassword(auth, email, password);
+                } catch (err) {
+                    setError("Verkeerd e-mailadres of wachtwoord.");
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="h-screen flex items-center justify-center bg-gray-50 px-6">
+                    <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl fade-in">
+                        <div className="text-center mb-8">
+                            <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-blue-600">
+                                <span className="material-icons-round text-3xl">lock</span>
+                            </div>
+                            <h1 className="text-2xl font-bold text-gray-800">Welkom</h1>
+                            <p className="text-gray-400 text-sm mt-1">Log in op jullie budget app</p>
+                        </div>
+                        <form onSubmit={handleLogin} className="space-y-4">
+                            <div>
+                                <label className="text-xs font-bold text-gray-400 uppercase ml-1">E-mail</label>
+                                <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-4 rounded-xl bg-gray-50 border border-transparent focus:bg-white focus:border-blue-500 outline-none transition-all font-medium" placeholder="naam@budget.be" required />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-400 uppercase ml-1">Wachtwoord</label>
+                                <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-4 rounded-xl bg-gray-50 border border-transparent focus:bg-white focus:border-blue-500 outline-none transition-all font-medium" placeholder="••••••••" required />
+                            </div>
+                            {error && <div className="text-red-500 text-sm text-center bg-red-50 p-3 rounded-xl">{error}</div>}
+                            <button type="submit" disabled={loading} className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50">
+                                {loading ? 'Laden...' : 'Inloggen'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
         const SHOP_DOMAINS = {
             'Colruyt': 'colruyt.be', 'Delhaize': 'delhaize.be', 'AH': 'ah.nl', 'Albert Heijn': 'ah.nl',
             'Aldi': 'aldi.be', 'Lidl': 'lidl.be', 'Shell': 'shell.com', 'Total': 'totalenergies.be',
@@ -93,7 +141,6 @@
 
         const CATEGORY_COLORS = { 'Boodschappen': '#3b82f6', 'Auto': '#ef4444', 'Horeca': '#f59e0b', 'Vaste Lasten': '#10b981', 'Shoppen': '#8b5cf6', 'Overig': '#9ca3af' };
 
-        // --- MODALS ---
         const EditTransactionModal = ({ transaction, onClose, onSave, onDelete }) => {
             const [formData, setFormData] = useState({ ...transaction });
             return (
@@ -144,7 +191,13 @@
             );
         };
 
+        // --- HOOFD APP LOGICA ---
         function App() {
+            // AUTH STATE
+            const [user, setUser] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
+
+            // APP STATE
             const [view, setView] = useState('add'); 
             const [amount, setAmount] = useState('');
             const [transactions, setTransactions] = useState([]);
@@ -160,18 +213,27 @@
             const barChartRef = useRef(null);
             const barChartInstance = useRef(null);
 
-            // --- REALTIME SYNC MET FIREBASE ---
+            // --- 1. AUTH CHECK & PERSISTENCE ---
             useEffect(() => {
-                if (!db) return;
+                const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+                    setUser(currentUser);
+                    setAuthLoading(false);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // --- 2. DATA SYNC (ALLEEN ALS INGELOGD) ---
+            useEffect(() => {
+                if (!db || !user) return;
                 
-                // 1. Luister naar Transacties (Realtime!)
+                // Transacties ophalen
                 const q = query(collection(db, "transactions"), orderBy("date", "desc"));
                 const unsubscribeTx = onSnapshot(q, (snapshot) => {
                     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setTransactions(data);
                 });
 
-                // 2. Luister naar Budget Instelling
+                // Budget ophalen
                 const docRef = doc(db, "settings", "budget");
                 const unsubscribeBudget = onSnapshot(docRef, (docSnap) => {
                     if (docSnap.exists()) {
@@ -180,85 +242,60 @@
                 });
 
                 return () => { unsubscribeTx(); unsubscribeBudget(); };
-            }, []);
-            // ----------------------------------
+            }, [user]);
+
+            // Grafieken en Focus
+            useEffect(() => {
+                if (user && view === 'stats') { setTimeout(() => { renderPieChart(); renderBarChart(); }, 50); }
+            }, [view, transactions, selectedCategory, user]);
 
             useEffect(() => {
-                if (view === 'stats') { setTimeout(() => { renderPieChart(); renderBarChart(); }, 50); }
-            }, [view, transactions, selectedCategory]);
+                if (user && view === 'add') { setShopSearch(''); setTimeout(() => document.getElementById('amountInput')?.focus(), 100); }
+            }, [view, user]);
 
-            useEffect(() => {
-                if (view === 'add') { setShopSearch(''); setTimeout(() => document.getElementById('amountInput')?.focus(), 100); }
-            }, [view]);
+            // --- ACTIES ---
+            const handleLogout = () => { if(confirm("Wil je uitloggen?")) signOut(auth); };
 
-            // --- ACTIONS ---
             const handleAdd = async (shop, catOverride = null) => {
                 if (!amount) { document.getElementById('amountInput').focus(); return; }
-                
                 let cat = 'Overig';
                 const lowerShop = shop.toLowerCase();
                 if (catOverride) cat = catOverride;
                 else {
-                    // Auto-categorisatie
                     if (['colruyt', 'delhaize', 'aldi', 'ah', 'lidl', 'kruidvat'].some(s => lowerShop.includes(s))) cat = 'Boodschappen';
                     else if (['shell', 'total', 'esso', 'lukoil', 'tesla'].some(s => lowerShop.includes(s))) cat = 'Auto';
                     else if (['restaurant', 'bar', 'mcdo', 'burger', 'starbucks', 'frituur'].some(s => lowerShop.includes(s))) cat = 'Horeca';
                     else if (['telenet', 'huisbaas', 'engie', 'proximus', 'luminus', 'spotify', 'netflix'].some(s => lowerShop.includes(s))) cat = 'Vaste Lasten';
                     else if (['bol.com', 'action', 'coolblue', 'amazon', 'ikea', 'decathlon'].some(s => lowerShop.includes(s))) cat = 'Shoppen';
                 }
-
                 try {
-                    await addDoc(collection(db, "transactions"), {
-                        amount: parseFloat(amount),
-                        shop: shop,
-                        category: cat,
-                        date: new Date().toISOString()
-                    });
-                    setAmount('');
-                    setShopSearch('');
-                    if (navigator.vibrate) navigator.vibrate(50);
-                } catch (e) { alert("Fout bij opslaan: " + e.message); }
+                    await addDoc(collection(db, "transactions"), { amount: parseFloat(amount), shop: shop, category: cat, date: new Date().toISOString() });
+                    setAmount(''); setShopSearch(''); if (navigator.vibrate) navigator.vibrate(50);
+                } catch (e) { alert("Fout: " + e.message); }
             };
 
             const handleUpdateTx = async (id, newData) => {
-                try {
-                    const txRef = doc(db, "transactions", id);
-                    await updateDoc(txRef, { amount: newData.amount, shop: newData.shop, category: newData.category });
-                    setEditingTx(null);
-                } catch (e) { alert("Kon niet updaten"); }
+                try { await updateDoc(doc(db, "transactions", id), { amount: newData.amount, shop: newData.shop, category: newData.category }); setEditingTx(null); } catch (e) { alert("Error bij updaten."); }
             };
 
             const handleDeleteTx = async (id) => {
-                if(confirm("Verwijderen?")) {
-                    await deleteDoc(doc(db, "transactions", id));
-                    setEditingTx(null);
-                }
+                if(confirm("Verwijderen?")) { await deleteDoc(doc(db, "transactions", id)); setEditingTx(null); }
             };
 
             const handleUpdateBudget = async (newVal) => {
-                await ioUpdateBudget(newVal);
-                setIsEditingBudget(false);
-            };
-            
-            // Helper om budget op te slaan (creëer document indien niet bestaat)
-            const ioUpdateBudget = async (val) => {
                 const docRef = doc(db, "settings", "budget");
-                // We gebruiken setDoc (merge) via updateDoc logica is lastiger als doc niet bestaat
-                // Voor simpelheid gebruiken we hier updateDoc, maar als het faalt, moeten we eigenlijk setDoc doen.
-                // Omdat ik geen setDoc heb geïmporteerd in de html, hacken we het even:
-                // We gaan er vanuit dat settings/budget document bestaat. Zo niet, maak het eenmalig aan in Firebase console of voeg error handling toe.
-                try {
-                    await updateDoc(docRef, { amount: parseFloat(val) });
-                } catch(e) {
-                   // Fallback: Als document niet bestaat, probeer set (via een workaround of alert)
-                   alert("Tip: Maak in Firebase een collectie 'settings' met document 'budget' aan."); 
+                // Gebruik setDoc met merge: true, zodat hij het document aanmaakt als het niet bestaat
+                try { 
+                    await setDoc(docRef, { amount: parseFloat(newVal) }, { merge: true }); 
+                    setIsEditingBudget(false); 
+                } catch(e) { 
+                    alert("Kon budget niet opslaan: " + e.message); 
                 }
-            }
+            };
 
-            // --- COMPUTED ---
+            // --- BEREKENINGEN ---
             const { displayShops, showAddNew } = useMemo(() => {
-                const counts = {};
-                transactions.forEach(t => { counts[t.shop] = (counts[t.shop] || 0) + 1; });
+                const counts = {}; transactions.forEach(t => { counts[t.shop] = (counts[t.shop] || 0) + 1; });
                 const allSortedShops = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
                 if (!shopSearch) {
                     const defaultShops = ['Colruyt', 'Delhaize', 'AH', 'Shell', 'Horeca', 'Bol.com'];
@@ -282,49 +319,35 @@
             const isOverBudget = currentTotalSpent > monthlyBudget;
             const remaining = monthlyBudget - currentTotalSpent;
 
-            // --- CHARTS ---
+            // --- GRAFIEKEN ---
             const renderPieChart = () => {
                 if (!pieChartRef.current || pieChartInstance.current) { if(pieChartInstance.current) pieChartInstance.current.destroy(); }
-                const totals = {};
-                filteredTransactions.forEach(t => { 
-                    const key = selectedCategory === 'Alles' ? t.category : t.shop;
-                    totals[key] = (totals[key] || 0) + t.amount;
-                });
+                const totals = {}; filteredTransactions.forEach(t => { const key = selectedCategory === 'Alles' ? t.category : t.shop; totals[key] = (totals[key] || 0) + t.amount; });
                 const ctx = pieChartRef.current.getContext('2d');
-                pieChartInstance.current = new Chart(ctx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: Object.keys(totals),
-                        datasets: [{ data: Object.values(totals), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1'], borderWidth: 0 }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 10 } } } } }
-                });
+                pieChartInstance.current = new Chart(ctx, { type: 'doughnut', data: { labels: Object.keys(totals), datasets: [{ data: Object.values(totals), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1'], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 10 } } } } } });
             };
-
             const renderBarChart = () => {
                 if (!barChartRef.current || barChartInstance.current) { if(barChartInstance.current) barChartInstance.current.destroy(); }
                 const monthlyData = {}; const allCategories = new Set();
                 const sortedTx = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
-                sortedTx.forEach(t => {
-                    if (selectedCategory !== 'Alles' && t.category !== selectedCategory) return;
-                    const monthKey = t.date.slice(0, 7); 
-                    if (!monthlyData[monthKey]) monthlyData[monthKey] = {};
-                    const key = selectedCategory === 'Alles' ? t.category : 'Totaal';
-                    monthlyData[monthKey][key] = (monthlyData[monthKey][key] || 0) + t.amount;
-                    allCategories.add(key);
-                });
+                sortedTx.forEach(t => { if (selectedCategory !== 'Alles' && t.category !== selectedCategory) return; const monthKey = t.date.slice(0, 7); if (!monthlyData[monthKey]) monthlyData[monthKey] = {}; const key = selectedCategory === 'Alles' ? t.category : 'Totaal'; monthlyData[monthKey][key] = (monthlyData[monthKey][key] || 0) + t.amount; allCategories.add(key); });
                 const labels = Object.keys(monthlyData).sort(); const categories = Array.from(allCategories);
-                const datasets = categories.map(cat => ({
-                    label: cat, data: labels.map(month => monthlyData[month][cat] || 0), backgroundColor: selectedCategory === 'Alles' ? (CATEGORY_COLORS[cat] || '#ccc') : (CATEGORY_COLORS[selectedCategory] || '#3b82f6'), borderRadius: 4,
-                }));
+                const datasets = categories.map(cat => ({ label: cat, data: labels.map(month => monthlyData[month][cat] || 0), backgroundColor: selectedCategory === 'Alles' ? (CATEGORY_COLORS[cat] || '#ccc') : (CATEGORY_COLORS[selectedCategory] || '#3b82f6'), borderRadius: 4 }));
                 const ctx = barChartRef.current.getContext('2d');
                 barChartInstance.current = new Chart(ctx, { type: 'bar', data: { labels, datasets }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true } }, plugins: { legend: { display: false } } } });
             };
 
-            // --- UI SCREENS ---
+            // --- RENDER CONDITIES ---
+            if (authLoading) return <div className="h-screen flex items-center justify-center bg-gray-50 text-gray-400">Laden...</div>;
+            if (!user) return <LoginScreen />;
+
+            // --- HOOFDSCHERM (ADD) ---
             const AddScreen = () => (
                 <div className="flex flex-col h-full slide-up">
-                    <div className="flex-none flex flex-col justify-center items-center py-6">
+                    <div className="flex-none flex flex-col justify-center items-center py-6 relative">
+                        <button onClick={handleLogout} className="absolute right-4 top-4 p-2 bg-gray-100 rounded-full text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                            <span className="material-icons-round text-sm">logout</span>
+                        </button>
                         <label className="text-gray-400 font-medium text-xs tracking-widest uppercase mb-2">Bedrag</label>
                         <div className="relative flex items-center justify-center">
                             <span className="text-3xl text-gray-300 mr-2 font-light">€</span>
@@ -356,6 +379,7 @@
                 </div>
             );
 
+            // --- STATISTIEKEN SCHERM ---
             const StatsScreen = () => (
                 <div className="flex flex-col h-full slide-up px-4 pt-4 pb-24 overflow-y-auto no-scrollbar">
                     <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar mb-2">
